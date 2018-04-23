@@ -21,7 +21,7 @@ public class BadgeProgress : MonoBehaviour
         foreach (Monster monster in _inventoryManager.Monsters) {
             TriviaCategory category = monster.TriviaCategory;
             Image image = transform.Find(category.ToString()).GetComponent<Image>();
-
+            
             switch (category) {
                 case TriviaCategory.ArtsAndLiterature:
                     image.sprite = ArtsAndLiteratureSprite;

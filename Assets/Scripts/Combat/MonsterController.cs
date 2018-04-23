@@ -1,23 +1,26 @@
 ﻿using UnityEngine;
 
 public class MonsterController : MonoBehaviour
-{    
+{
     public Monster Monster;
+    public float MonsterHealth;
 
     // TODO Add a "level" to the monster and include damage/health multipliers
 
+    private void Start() {
+        MonsterHealth = Monster.Health;
+    }
+
     public void OnAttack() {
-        Debug.Log("Attack");
+        // TODO
     }
 
     public void OnMiss() {
-        Debug.Log("Attack");
+        // TODO
     }
 
     public void OnTakeDamage(float damage) {
-        // TODO Multiply damage by category interactions
-        Debug.Log("TakeDamage");
-        Monster.Health = Mathf.Max(0f, Monster.Health - damage);
+        MonsterHealth = Mathf.Max(0f, MonsterHealth - damage);
     }
 
     public int GetCategoryInt() {

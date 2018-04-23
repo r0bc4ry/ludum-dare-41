@@ -2,8 +2,8 @@
 {
     ArtsAndLiterature,
     Entertainment,
-    Geography,
     GeneralKnowledge,
+    Geography,
     History,
     ScienceAndNature,
     SportsAndLeisure

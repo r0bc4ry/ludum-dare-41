@@ -13,5 +13,5 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   Name: General Knowledge Monster
   Health: 100
-  TriviaCategory: 3
+  TriviaCategory: 2
   ResourcePath: GeneralKnowledgeMonster

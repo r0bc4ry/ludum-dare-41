@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using UnityEngine.UI;
 
 [RequireComponent(typeof(Animator))]
 [RequireComponent(typeof(CapsuleCollider))]
@@ -25,6 +26,8 @@ public class PlayerController : MonoBehaviour
 
     public void Move(Vector3 move, bool interactButtonDown) {
         if (Interactable != null) {
+            Text interactableText = InteractablePanelGui.transform.Find("Text").GetComponent<Text>();
+            interactableText.text = "Press <b><color=#C95641>E</color></b> To Talk To <b><color=#C95641>" + Interactable.name + "</color></b>";
             InteractablePanelGui.SetActive(true);
             if (interactButtonDown) {
                 Interactable.Interact();

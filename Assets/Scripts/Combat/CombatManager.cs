@@ -1,8 +1,10 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
+using RestSharp.Contrib;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.UI;
+using Random = UnityEngine.Random;
 
 public class CombatManager : MonoBehaviour
 {
@@ -11,17 +13,22 @@ public class CombatManager : MonoBehaviour
     public GameObject CombatGameplayParent;
     public GameObject CombatUiParent;
 
+    public AudioSource AudioSource;
+    public AudioClip StartCombatAudioClip;
+    public AudioClip HitAudioClip;
+    public AudioClip MissAudioClip;
+    public AudioClip NewBadgeClip;
+
     private Queue<Monster> _enemyMonsters = new Queue<Monster>();
     public Transform PlayerMonsterSpawnPosition;
     public Transform EnemyMonsterSpawnPosition;
     private MonsterController _playerMonsterController;
     private MonsterController _enemyMonsterController;
-    private float _playerMonsterOriginalHealth;
-    private float _enemyMonsterOriginalHealth;
 
     // ActionSelection -> AttackSelection -> TriviaQuestion -> Attack or Miss
     public GameObject BattlePanelUi;
-    public GameObject ActionSelectionUi;
+    public GameObject MonsterSelectionUi;
+    public GameObject MonsterSelectionListUi;
     public GameObject AttackDifficultySelectionUi;
     public GameObject AttackQuestionUi;
     public Text AttackQuestionText;
@@ -31,70 +38,141 @@ public class CombatManager : MonoBehaviour
     public Text AttackQuestionAnswerDText;
     public GameObject AttackResultUi;
 
-    // TODO Make MonsterPanel prefab showing stats about monster(s)
+    public Image FadeCameraInOutImage;
     public MonsterPanel PlayerMonsterPanel;
     public MonsterPanel EnemyMonsterPanel;
 
     private bool _isPlayersTurn = true;
-    private bool _isBeginningOfPlayersTurn = true;
 
     private string _attackDifficulty;
     private int _correctAnswer;
 
-    public void StartBattle(Monster[] monsters) {
+    public Monster DefaultMonster;
+    private InventoryManager _inventoryManager;
+
+    private GameObject _playerMonsterMesh;
+    private GameObject _enemyMonsterMesh;
+
+    private NPC _activeNpc;
+
+    private void Start() {
+        _inventoryManager = FindObjectOfType<InventoryManager>();
+    }
+
+    // TODO This is for testing - remove
+    public void Win() {
+        EndBattle(true);
+    }
+
+    public void StartBattle(NPC npc) {
+        _activeNpc = npc;
+
+        // Play battle sound effect
+        AudioSource.clip = StartCombatAudioClip;
+        AudioSource.Play();
+
+        // Enqueue monsteres
         _enemyMonsters.Clear();
-        foreach (Monster monster in monsters) {
+        foreach (Monster monster in npc.EnemyMonsters) {
             _enemyMonsters.Enqueue(monster);
         }
 
         // Spawn enemy's monster
         Monster enemyMonster = _enemyMonsters.Dequeue();
         InstantiateMonster(enemyMonster, false);
-        _enemyMonsterOriginalHealth = enemyMonster.Health;
 
-        // TODO Let player choose monster to fight with
+        // Fade out and in on battle gameplay
+        StartCoroutine(SwitchToCombatGameplay());
+    }
 
-        // Spawn player's monster
-        Monster playerMonster = FindObjectOfType<InventoryManager>().Monsters[0];
-        InstantiateMonster(FindObjectOfType<InventoryManager>().Monsters[0], true);
-        _playerMonsterOriginalHealth = playerMonster.Health;
+    private IEnumerator SwitchToCombatGameplay() {
+        float fadeTime = 0.5f;
+        StartCoroutine(FadeCameraInOut(true, fadeTime));
 
-        EnemyMonsterPanel.Monster = enemyMonster;
-        PlayerMonsterPanel.Monster = playerMonster;
+        yield return new WaitForSeconds(fadeTime);
 
         ExplorationGameplayParent.SetActive(false);
         ExplorationUiParent.SetActive(false);
         CombatGameplayParent.SetActive(true);
         CombatUiParent.SetActive(true);
 
-        OnAttackAction();
+        BattlePanelUi.SetActive(true);
+
+        if (_inventoryManager.Monsters.Count == 0) {
+            InstantiateMonster(DefaultMonster, true);
+            AttackDifficultySelectionUi.SetActive(true);
+        } else if (_inventoryManager.Monsters.Count == 1) {
+            InstantiateMonster(_inventoryManager.Monsters[0], true);
+            AttackDifficultySelectionUi.SetActive(true);
+        } else {
+            ShowMonsterSelection();
+        }
+
+        StartCoroutine(FadeCameraInOut(false, fadeTime));
+    }
+
+    private IEnumerator FadeCameraInOut(bool fadeToBlack, float waitTime) {
+        float elapsedTime = 0;
+        while (elapsedTime < waitTime) {
+            Color color = FadeCameraInOutImage.color;
+            color.a = Mathf.Lerp(fadeToBlack ? 0f : 1f, fadeToBlack ? 1f : 0f, elapsedTime / waitTime);
+            FadeCameraInOutImage.color = color;
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+    }
+
+    private void ShowMonsterSelection() {
+        foreach (Monster monster in _inventoryManager.Monsters) {
+            for (int i = 0; i < MonsterSelectionListUi.transform.childCount; i++) {
+                GameObject button = MonsterSelectionListUi.transform.GetChild(i).gameObject;
+                if (monster.Name == button.transform.Find("Text").GetComponent<Text>().text) {
+                    button.SetActive(true);
+                }
+            }
+        }
+
+        MonsterSelectionUi.SetActive(true);
+    }
+
+    public void OnMonsterSelected(string category) {
+        // Spawn player's selected monster
+        foreach (Monster monster in _inventoryManager.Monsters) {
+            if (category == monster.TriviaCategory.ToString()) {
+                InstantiateMonster(monster, true);
+                PlayerMonsterPanel.Monster = monster;
+                PlayerMonsterPanel.MonsterController = _playerMonsterController;
+                PlayerMonsterPanel.gameObject.SetActive(true);
+            }
+        }
+
+        // Clean-up UI after selection
+        for (int i = 0; i < MonsterSelectionListUi.transform.childCount; i++) {
+            GameObject button = MonsterSelectionListUi.transform.GetChild(i).gameObject;
+            button.SetActive(false);
+        }
+
+        MonsterSelectionUi.SetActive(false);
+
+        // Move to attack difficulty selectiond
+        AttackDifficultySelectionUi.SetActive(true);
     }
 
     private void InstantiateMonster(Monster monster, bool isFriendly) {
         GameObject instance = Instantiate(Resources.Load<GameObject>(monster.ResourcePath), isFriendly ? PlayerMonsterSpawnPosition : EnemyMonsterSpawnPosition);
         if (isFriendly) {
             _playerMonsterController = instance.GetComponent<MonsterController>();
+            PlayerMonsterPanel.Monster = monster;
+            PlayerMonsterPanel.MonsterController = _playerMonsterController;
+            PlayerMonsterPanel.gameObject.SetActive(true);
+            _playerMonsterMesh = instance;
         } else {
             _enemyMonsterController = instance.GetComponent<MonsterController>();
+            EnemyMonsterPanel.Monster = monster;
+            EnemyMonsterPanel.MonsterController = _enemyMonsterController;
+            EnemyMonsterPanel.gameObject.SetActive(true);
+            _enemyMonsterMesh = instance;
         }
-    }
-
-    void Update() {
-        if (_isPlayersTurn) {
-            if (_isBeginningOfPlayersTurn) {
-                BattlePanelUi.SetActive(true);
-                OnAttackAction(); // TODO Move to after selection of action
-                _isBeginningOfPlayersTurn = false;
-            }
-        } else {
-            // TODO Handle enemy AI
-            OnEnemyTurn();
-        }
-    }
-
-    void OnAttackAction() {
-        // TODO AttackSelection UI
-        AttackDifficultySelectionUi.SetActive(true);
     }
 
     public void OnAttack(string difficulty) {
@@ -127,19 +205,19 @@ public class CombatManager : MonoBehaviour
 
                 JSONObject json = new JSONObject(www.downloadHandler.text);
 
-                string question = json["results"][0]["question"].str;
+                string question = HttpUtility.HtmlDecode(json["results"][0]["question"].str);
 
                 // Create a List of answers, including the correct answer, and shuffle them
                 List<string> answers = new List<string>();
                 var jsonAnswers = json["results"][0]["incorrect_answers"];
                 foreach (JSONObject obj in jsonAnswers.list) {
-                    answers.Add(obj.str);
+                    answers.Add(HttpUtility.HtmlDecode(obj.str));
                 }
 
-                answers.Add(json["results"][0]["correct_answer"].str);
+                answers.Add(HttpUtility.HtmlDecode(json["results"][0]["correct_answer"].str));
                 ShuffleAnswers(answers);
 
-                int correctAnswerIndex = answers.FindIndex(x => x == json["results"][0]["correct_answer"].str);
+                int correctAnswerIndex = answers.FindIndex(x => x == HttpUtility.HtmlDecode(json["results"][0]["correct_answer"].str));
 
                 UpdateAttackQuestion(question, answers, correctAnswerIndex);
             }
@@ -157,7 +235,11 @@ public class CombatManager : MonoBehaviour
         }
     }
 
+    private List<string> _answers;
+
     private void UpdateAttackQuestion(string question, List<string> answers, int correctAnswerIndex) {
+        _answers = answers;
+        
         AttackQuestionText.text = question;
         AttackQuestionAnswerAText.text = answers[0];
         AttackQuestionAnswerBText.text = answers[1];
@@ -173,109 +255,184 @@ public class CombatManager : MonoBehaviour
         Text resultText = AttackResultUi.transform.Find("Text").GetComponent<Text>();
 
         if (selectedAnswer == _correctAnswer) {
-            // TODO Show better UI for attack hit and miss
-            resultText.text = "Correct! Attack!";
+            float damageAmount = DetermineDamageAmount(_attackDifficulty);
 
-            // TODO Update damage calculation based on question difficulty
-            float damageAmount = 0f;
-            switch (_attackDifficulty) {
-                case "easy":
-                    damageAmount = 10f;
-                    break;
-                case "medium":
-                    damageAmount = 25f;
-                    break;
-                case "hard":
-                    damageAmount = 50f;
-                    break;
-            }
+            resultText.text = "Correct! Your monster attacks for " + damageAmount + " damage!";
 
-            // Determine if critical hit
-            float criticalHitChange = 0.0625f;
-            float randValue = Random.value;
+            // Play hit sound
+            AudioSource.clip = HitAudioClip;
+            AudioSource.Play();
 
-            if (randValue < 1f - criticalHitChange) {
-                Debug.Log("Critical Hit!"); // TODO Add visual feedback for critical hit
-                damageAmount *= 1.625f;
-            }
-
-            _playerMonsterController.OnAttack();
+            // Deal damage to enemy
             _enemyMonsterController.OnTakeDamage(damageAmount);
-
-            if (_enemyMonsterController.Monster.Health <= 0f) {
-                OnMonsterDeath(true);
+            if (_enemyMonsterController.MonsterHealth <= 0f) {
+                EndBattle(true);
             }
         } else {
+            // Play miss sound
+            AudioSource.clip = MissAudioClip;
+            AudioSource.Play();
+
             // TODO Show missed attack
-            resultText.text = "Wrong! Miss!";
+            resultText.text = "Wrong! The correct answer was " + _answers[_correctAnswer] + ".";
             _playerMonsterController.OnMiss();
         }
 
         AttackQuestionUi.SetActive(false);
         AttackResultUi.SetActive(true);
 
-        StartCoroutine(SwitchTurn(2f));
+        StartCoroutine(SwitchTurn(false, 3f));
     }
 
-    private IEnumerator SwitchTurn(float waitTime) {
+    private IEnumerator SwitchTurn(bool isPlayerNext, float waitTime) {
         yield return new WaitForSeconds(waitTime);
 
-        AttackResultUi.SetActive(false);
-        BattlePanelUi.SetActive(false);
-        _isPlayersTurn = false;
-        _isBeginningOfPlayersTurn = true;
+        if (isPlayerNext) {
+            AttackResultUi.SetActive(false);
+            AttackDifficultySelectionUi.SetActive(true);
+        } else {
+            OnEnemyTurn();
+        }
+
+        _isPlayersTurn = isPlayerNext;
     }
 
     private void OnEnemyTurn() {
-        int difficulty = Random.Range(0, 3);
-        bool attackHits = Random.value >= 0.5;
+        Text resultText = AttackResultUi.transform.Find("Text").GetComponent<Text>();
 
-        if (attackHits) {
-            float damageAmount = 0f;
-            switch (difficulty) {
+        if (Random.value >= 0.33333333333333333333333333333333f) {
+            string difficulty = "medium";
+            switch (Random.Range(0, 3)) {
                 case 0:
-                    damageAmount = 10f;
+                    difficulty = "easy";
                     break;
                 case 1:
-                    damageAmount = 25f;
+                    difficulty = "medium";
                     break;
                 case 2:
-                    damageAmount = 50f;
+                    difficulty = "hard";
                     break;
             }
 
-            _enemyMonsterController.OnAttack();
+            float damageAmount = DetermineDamageAmount(difficulty);
+
+            resultText.text = "Enemy hits for " + damageAmount + " damage!";
+
+            // Play hit sound
+            AudioSource.clip = HitAudioClip;
+            AudioSource.Play();
+
+            // Deal damage to player
             _playerMonsterController.OnTakeDamage(damageAmount);
 
-            if (_playerMonsterController.Monster.Health <= 0f) {
-                OnMonsterDeath(false);
+            if (_playerMonsterController.MonsterHealth <= 0f) {
+                EndBattle(false);
             }
         } else {
+            resultText.text = "Enemy misses!";
+
+            // Play miss sound
+            AudioSource.clip = MissAudioClip;
+            AudioSource.Play();
+
             _enemyMonsterController.OnMiss();
         }
 
-        // TODO Let player know if enemy hit or nah
-
-        _isPlayersTurn = true;
+        StartCoroutine(SwitchTurn(true, 3f));
     }
 
-    private void OnMonsterDeath(bool wonFight) {
-        if (wonFight) {
-            // TODO Give player new monster/category in GameManager
-            FindObjectOfType<InventoryManager>().Monsters.Add(_enemyMonsterController.Monster);
+    private float DetermineDamageAmount(string difficulty) {
+        float damageAmount = 0f;
+        switch (difficulty) {
+            case "easy":
+                damageAmount = 25f;
+                break;
+            case "medium":
+                damageAmount = 37.5f;
+                break;
+            case "hard":
+                damageAmount = 50f;
+                break;
         }
 
-        EndBattle();
+        float criticalHitChance = 6.25f;
+        float randomValue = Random.Range(0f, 100f);
+        if (randomValue < criticalHitChance) {
+            damageAmount *= 1.625f;
+            StartCoroutine(ShowCriticalHit());
+        }
+
+        // Determine if critical hit
+        // float criticalHitChange = 0.0625f;
+        // float randValue = Random.value;
+
+        // if (randValue < 1f - criticalHitChange) {
+        //     Debug.Log("Critical Hit!"); // TODO Add visual feedback for critical hit
+        //     damageAmount *= 1.625f;
+        // }
+
+        return damageAmount;
+    }
+    
+    public Text WinText;
+    public Text CriticalHitText;
+
+    private IEnumerator ShowCriticalHit() {
+        CriticalHitText.gameObject.SetActive(true);
+        yield return new WaitForSeconds(2f);
+        CriticalHitText.gameObject.SetActive(false);
     }
 
-    public void EndBattle() {
-        // Reset monster health
-        _enemyMonsterController.Monster.Health = _enemyMonsterOriginalHealth;
-        _playerMonsterController.Monster.Health = _playerMonsterOriginalHealth;
+    private void EndBattle(bool wonFight) {
+        WinText.text = wonFight ? "You Won!" : "You Lost!";
+        WinText.gameObject.SetActive(true);
+
+        if (wonFight) {
+            AudioSource.clip = NewBadgeClip;
+            AudioSource.Play();
+
+            _inventoryManager.Monsters.Add(_enemyMonsterController.Monster);
+        }
+
+        StartCoroutine(EndFightWait(wonFight));
+    }
+
+    private IEnumerator EndFightWait(bool wonFight) {
+        yield return new WaitForSeconds(3f);
+
+        if (_activeNpc != null && wonFight) {
+            _activeNpc.OnEndBattle();
+        }
+
+        _activeNpc = null;
+
+        StartCoroutine(SwitchToExplorationGameplay());
+    }
+
+    private IEnumerator SwitchToExplorationGameplay() {
+        float fadeTime = 0.5f;
+        StartCoroutine(FadeCameraInOut(true, fadeTime));
+
+        yield return new WaitForSeconds(fadeTime);
+
+        EnemyMonsterPanel.gameObject.SetActive(false);
+        PlayerMonsterPanel.gameObject.SetActive(false);
 
         CombatGameplayParent.SetActive(false);
         CombatUiParent.SetActive(false);
         ExplorationGameplayParent.SetActive(true);
         ExplorationUiParent.SetActive(true);
+
+        MonsterSelectionUi.SetActive(false);
+        AttackDifficultySelectionUi.SetActive(false);
+        AttackQuestionUi.SetActive(false);
+        AttackResultUi.SetActive(false);
+
+        WinText.gameObject.SetActive(false);
+
+        Destroy(_enemyMonsterMesh);
+        Destroy(_playerMonsterMesh);
+
+        StartCoroutine(FadeCameraInOut(false, fadeTime));
     }
 }
