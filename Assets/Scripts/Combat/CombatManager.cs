@@ -300,7 +300,7 @@ public class CombatManager : MonoBehaviour
     private void OnEnemyTurn() {
         Text resultText = AttackResultUi.transform.Find("Text").GetComponent<Text>();
 
-        if (Random.value >= 0.33333333333333333333333333333333f) {
+        if (Random.value >= 0.25f) {
             string difficulty = "medium";
             switch (Random.Range(0, 3)) {
                 case 0:
